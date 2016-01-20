@@ -233,7 +233,7 @@ country = CN
 organization = "Cisco"
 serial = 1
 expiration_days = 1825
-email = "realstones2012@gmail.com"
+email = "youremail@gmail.com"
 dns_name = ${cname}
 ca
 signing_key
@@ -248,7 +248,7 @@ _EOF_
 cat << _EOF_ >server.tmpl
 cn = ${cname}
 o = "Cisco"
-email = "realstones2012@gmail.com"
+email = "youremail@gmail.com"
 dns_name = ${cname}
 country = CN
 state = "Shanghai"
@@ -266,7 +266,7 @@ _EOF_
 cat << _EOF_ >user.tmpl
 cn = "AnyClient"
 unit = "Route"
-email = "realstones2012@gmail.com
+email = "youremail@gmail.com"
 dns_name = ${cname}
 country = CN
 serial = 3
