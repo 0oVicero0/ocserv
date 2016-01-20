@@ -292,7 +292,8 @@ _EOF_
 
     #copy the shell script to make the user's cert
     mkdir -p $confdir/usercert
-    wget monokoo.com/app/make-client.sh && chmod +x make-client.sh && cp make-client.sh $confdir/usercert/ && cp user.tmpl $confdir/usercert/ 
+    wget --no-check-certificate https://raw.githubusercontent.com/monokoo/Ocserv-install-script-for-CentOS-RHEL-7/master/make-client.sh  && chmod +x make-client.sh
+	cp make-client.sh $confdir/usercert/ && cp user.tmpl $confdir/usercert/ 
 
     #编辑配置文件
     (echo "${password}"; sleep 1; echo "${password}") | ocpasswd -g "All,Route,NoRoute" -c "${confdir}/ocpasswd" ${username}
@@ -325,20 +326,20 @@ _EOF_
     sed -i 's$no-route = 192.168.5.0/255.255.255.0$#no-route = 192.168.5.0/255.255.255.0$' "${confdir}/ocserv.conf"
     sed -i 's/#select-group = group1/select-group = All/g' "${confdir}/ocserv.conf"
     sed -i 's/#select-group = group2\[My special group\]/select-group = Route/g' "${confdir}/ocserv.conf"
-#   sed -i '/select-group = Route/a\select-group = AnyConnect' "${confdir}/ocserv.conf"
     sed -i '/select-group = Route/a\select-group = NoRoute' "${confdir}/ocserv.conf"
     sed -i 's/#default-select-group = DEFAULT/default-select-group = All/g' "${confdir}/ocserv.conf"
     sed -i 's/#auto-select-group = true/auto-select-group = false/g' "${confdir}/ocserv.conf"
     sed -i 's$#config-per-group = /etc/ocserv/config-per-group\/$config-per-group = /opt/ocserv/config-per-group$g' "${confdir}/ocserv.conf"
     sed -i 's$#default-group-config = /etc/ocserv/defaults/group.conf$default-group-config = /opt/ocserv/config-per-group/group.conf$' "${confdir}/ocserv.conf"
+	
     mkdir -p ${confdir}/config-per-group
-    cat << _EOF_ >>${confdir}/config-per-group/All
+    
+	cat << _EOF_ >>${confdir}/config-per-group/All
 route = 0.0.0.0/128.0.0.0
 route = 128.0.0.0/128.0.0.0
 _EOF_
     
    cp $confdir/config-per-group/All $confdir/config-per-group/group.conf
-#  cp $confdir/config-per-group/All $confdir/config-per-group/AnyConnect  
 
     cat << _EOF_ >>${confdir}/config-per-group/NoRoute
 no-route = 1.0.0.0/255.192.0.0
