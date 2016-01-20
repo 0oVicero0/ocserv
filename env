@@ -1,0 +1,13 @@
+alias cdss='cd /opt/shadowsocksrss/'
+alias viss='vim /etc/shadowsocksrss/config.json'
+alias viip='vim /etc/sysconfig/iptables'
+alias sslog='tail -f /var/log/shadowsocks.log'
+alias ssrestart='service shadowsocksr restart'
+alias iprestart='service iptables restart'
+alias cdoc='cd /opt/ocserv'
+alias ocrestart='service ocserv restart'
+alias ocstop='service ocserv stop'
+alias oclog='systemctl status ocserv.service'
+alias vioc='vim /opt/ocserv/ocserv.conf'
+alias ocrecert='sh /opt/ocserv/usercert/make-client.sh'
+ulimit -SHn 51200

@@ -2,11 +2,16 @@
 ####################################################
 #                                                  #
 # This is a ocserv installation for CentOS 7       #
-# Version: 1.2.5 20151009                          #
-# Author: Travis Lee                               #
-# Website: https://www.stunnel.info                #
-#                                                  #
+# Version: 1.2.7 20150120                          #
+# Author: Monokoo                                  #
+# Thanks for original author: Travis Lee           #
 ####################################################
+#  Version: 1.2.7 20150120
+#  *更新ocserv的版本为0.10.11
+#  *增加证书分组
+
+#  Version: 1.2.6 20151229
+#  *更新ocserv的版本为0.10.10
 
 #  Version: 1.2.5 20151009
 #  *源码下载改回作者的官方网站
@@ -41,25 +46,30 @@ if [[ $(grep "release 7." /etc/redhat-release 2>/dev/null | wc -l) -eq 0 ]]; the
     printf "\e[42m\e[31mThis install script is ONLY for CentOS 7 and RHEL 7.\e[0m\n"
     exit 1
 fi
+#check install 防止重复安装
+#    [ -f /usr/sbin/ocserv ]
+#    printf "Not installed ok"
 
 basepath=$(dirname $0)
 cd ${basepath}
 
 function ConfigEnvironmentVariable {
     #ocserv版本
-    ocserv_version="0.10.9"
+    ocserv_version="0.10.11"
     version=${1-${ocserv_version}}
     libtasn1_version=4.7
+    nettle_version=3.1
+    gnutls_version=3.3.20
     #变量设置
     #单IP最大连接数，默认是2
-    maxsameclients=10
+    maxsameclients=2
     #最大连接数，默认是16
-    maxclients=1024
+    maxclients=12
     #服务器的证书和key文件，放在本脚本的同目录下，key文件的权限应该是600或者400
     servercert=${2-server-cert.pem}
     serverkey=${3-server-key.pem}
     #配置目录，你可更改为 /etc/ocserv 之类的
-    confdir="/usr/local/etc/ocserv"
+    confdir="/opt/ocserv"
 
     #安装系统组件
     yum install -y -q net-tools bind-utils
@@ -78,7 +88,9 @@ function ConfigEnvironmentVariable {
             eth=${ethtmp}
         fi
     fi
-
+    
+    ipv4=$(ip -4 -f inet addr | grep "inet " | grep -v "lo:" | grep -v "127.0.0.1" | grep -o -P "\d+\.\d+\.\d+\.\d+\/\d+" | grep -o -P "\d+\.\d+\.\d+\.\d+")
+   
     #端口，默认是10443
     port=10443
     echo "Please input the port ocserv listen to."
@@ -88,8 +100,17 @@ function ConfigEnvironmentVariable {
         port=${porttmp}
     fi
 
-    #用户名，默认是user
-    username=user
+    #设置证书CN名，默认是当前服务器IP地址
+    cname=${ipv4}
+    echo "Please input the cname for certificate. The default cname is your server's IP address"
+    printf "Default cname is \e[33m${ipv4}\e[0m, let it blank to use default cname: "
+    read cnametmp
+    if [[ -n "${cnametmp}" ]]; then
+        cname=${cnametmp}
+    fi
+
+    #用户名，默认是github
+    username=github
     echo "Please input ocserv user name:"
     printf "Default user name is \e[33m${username}\e[0m, let it blank to use default user name: "
     read usernametmp
@@ -145,430 +166,454 @@ function PrintEnvironmentVariable {
 function CompileOcserv {
     #升级系统
     #yum update -y -q
-    yum install -y -q epel-release
+    #yum install -y -q epel-release
     #安装ocserv依赖组件
-    yum install -y gnutls gnutls-utils gnutls-devel readline readline-devel \
-    libnl-devel libtalloc libtalloc-devel libnl3-devel wget \
-    pam pam-devel libtalloc-devel xz libseccomp-devel \
-    tcp_wrappers-devel autogen autogen-libopts-devel tar \
-    gcc pcre-devel openssl openssl-devel curl-devel \
-    freeradius-client-devel freeradius-client lz4-devel lz4 \
-    http-parser-devel http-parser protobuf-c-devel protobuf-c \
-    pcllib-devel pcllib cyrus-sasl-gssapi dbus-devel policycoreutils gperf
+    yum install -y gnutls gnutls-utils gnutls-devel readline readline-devel texinfo
+    yum install -y libnl-devel libtalloc libtalloc-devel libnl3-devel wget libidn unbound
+    yum install -y pam pam-devel libtalloc-devel xz libseccomp-devel liboath* zlib bison bison-devel
+    yum install -y tcp_wrappers trousers-devel gmp-devel libn1-devel libtasn1-devel flex
+    yum install -y tcp_wrappers-devel autogen autogen-libopts-devel tar gcc pcre-devel openssl openssl-devel curl-devel 
+    yum install -y freeradius-client-devel freeradius-client lz4-devel lz4 http-parser-devel http-parser 
+    yum install -y protobuf-c-devel protobuf-c pcllib-devel pcllib cyrus-sasl-gssapi dbus-devel policycoreutils gperf
 
-:<<_EOF_
+    #下载ocserv并编译
+    wget -t 0 -T 60 "ftp://ftp.infradead.org/pub/ocserv/ocserv-${version}.tar.xz"
+    #wget -t 0 -T 60 "https://github.com/mtmiller/ocserv/archive/ocserv_${version}.tar.gz" -O "ocserv-${version}.tar.gz"
+    tar axf ocserv-${version}.tar.xz
+    cd ocserv-${version}
+    sed -i 's/#define DEFAULT_CONFIG_ENTRIES.*/#define DEFAULT_CONFIG_ENTRIES 200/g' src/vpn.h
+    ./configure && make && make install
+
+    #复制配置文件样本
+    mkdir -p "${confdir}"
+#   cp "doc/profile.xml" "${confdir}/profile.xml"
+    cp "doc/sample.config" "${confdir}/ocserv.conf"
+    cp "doc/systemd/standalone/ocserv.service" "/usr/lib/systemd/system/ocserv.service"
+    cd ${basepath}
+}
+
+function UpdateComponents {
+    cd ${basepath}   
+    #import PKG_CONFIG_PATH 
+    PKG_CONFIG_PATH=/usr/local/lib64/pkgconfig:/usr/lib64/pkgconfig:/usr/local/lib/pkgconfig:/usr/lib/pkgconfig
+
     wget -t 0 -T 60 "http://ftp.gnu.org/gnu/libtasn1/libtasn1-${libtasn1_version}.tar.gz"
     tar axf libtasn1-${libtasn1_version}.tar.gz
     cd libtasn1-${libtasn1_version}
     ./configure --prefix=/usr --libdir=/usr/lib64 --includedir=/usr/include
     make && make install
     cd ..
-_EOF_
 
     #增加libgnutls环境变量
-     ##export LIBGNUTLS_CFLAGS="-I/usr/include/" LIBGNUTLS_LIBS="-L/usr/lib/ -lgnutls"
+    ##export LIBGNUTLS_CFLAGS="-I/usr/include/" LIBGNUTLS_LIBS="-L/usr/lib/ -lgnutls"
 
-    #下载ocserv并编译安装
-    wget -t 0 -T 60 "ftp://ftp.infradead.org/pub/ocserv/ocserv-${version}.tar.xz"
-    #wget -t 0 -T 60 "https://github.com/mtmiller/ocserv/archive/ocserv_${version}.tar.gz" -O "ocserv-${version}.tar.gz"
-    tar axf ocserv-${version}.tar.xz
-    cd ocserv-${version}
-    sed -i 's/#define MAX_CONFIG_ENTRIES.*/#define MAX_CONFIG_ENTRIES 200/g' src/vpn.h
-    ./configure && make && make install
+    #编译nettle
+    wget -t 0 -T 60 "https://ftp.gnu.org/gnu/nettle/nettle-${nettle_version}.tar.gz" && tar -axf nettle-${nettle_version}.tar.gz && cd nettle-${nettle_version}
+    ./configure --prefix=/usr --enable-shared 
+     make && make install
 
-    #复制配置文件样本
-    mkdir -p "${confdir}"
-    cp "doc/sample.config" "${confdir}/ocserv.conf"
-    cp "doc/systemd/standalone/ocserv.service" "/usr/lib/systemd/system/ocserv.service"
-    cd ${basepath}
+    #编译gnutls
+    cd ..
+    wget -t 0 -T 60 "ftp://ftp.gnutls.org/gcrypt/gnutls/v3.3/gnutls-${gnutls_version}.tar.xz" && tar -xaf gnutls-${gnutls_version}.tar.xz && cd gnutls-${gnutls_version}
+    ./configure --prefix=/usr --enable-shared
+     make && make install
+     cd ${basepath}
 }
 
 function ConfigOcserv {
+    ipv4=$(ip -4 -f inet addr | grep "inet " | grep -v "lo:" | grep -v "127.0.0.1" | grep -o -P "\d+\.\d+\.\d+\.\d+\/\d+" | grep -o -P "\d+\.\d+\.\d+\.\d+")
     #检测是否有证书和key文件
     if [[ ! -f "${servercert}" ]] || [[ ! -f "${serverkey}" ]]; then
         #创建ca证书和服务器证书（参考http://www.infradead.org/ocserv/manual.html#heading5）
-        certtool --generate-privkey --outfile ca-key.pem
-
-        cat << _EOF_ >ca.tmpl
-cn = "stunnel.info VPN"
-organization = "stunnel.info"
+     openssl genrsa -out ca-key.pem 4096
+cat << _EOF_ >ca.tmpl
+cn = "Cisco CA"
+state = "Shanghai"
+country = CN
+organization = "Cisco"
 serial = 1
-expiration_days = 3650
+expiration_days = 1825
+email = "realstones2012@gmail.com"
+dns_name = ${cname}
 ca
 signing_key
+encryption_key
 cert_signing_key
 crl_signing_key
 _EOF_
 
-        certtool --generate-self-signed --load-privkey ca-key.pem \
-        --template ca.tmpl --outfile ca-cert.pem
-        certtool --generate-privkey --outfile ${serverkey}
-
-        cat << _EOF_ >server.tmpl
-cn = "stunnel.info VPN"
-o = "stunnel"
+      certtool --generate-self-signed --hash SHA256 --load-privkey ca-key.pem --template ca.tmpl --outfile ca-cert.pem
+#     openssl req -new -newkey rsa:4096 -sha256 -nodes -out server.csr -keyout server-key.pem
+      openssl genrsa -out ${serverkey} 4096
+cat << _EOF_ >server.tmpl
+cn = ${cname}
+o = "Cisco"
+email = "realstones2012@gmail.com"
+dns_name = ${cname}
+country = CN
+state = "Shanghai"
 serial = 2
-expiration_days = 3650
+expiration_days = 1825
 signing_key
 encryption_key #only if the generated key is an RSA one
 tls_www_server
 _EOF_
 
-        certtool --generate-certificate --load-privkey ${serverkey} \
-        --load-ca-certificate ca-cert.pem --load-ca-privkey ca-key.pem \
-        --template server.tmpl --outfile ${servercert}
+     certtool --generate-certificate --hash SHA256 --load-privkey ${serverkey} --load-ca-certificate ca-cert.pem --load-ca-privkey ca-key.pem --template server.tmpl --outfile server-self-signed-cert.pem
+     certtool --generate-request --hash SHA256  --load-privkey ${serverkey} --template server.tmpl --outfile server-cert.csr	 
+#    openssl genrsa -out user-key.pem 2048
+		
+cat << _EOF_ >user.tmpl
+cn = "AnyClient"
+unit = "Route"
+email = "realstones2012@gmail.com
+dns_name = ${cname}
+country = CN
+serial = 3
+expiration_days = 365
+signing_key
+tls_www_client
+_EOF_
+
+#     certtool --generate-certificate --hash SHA256 --load-privkey user-key.pem --load-ca-certificate ca-cert.pem --load-ca-privkey ca-key.pem --template user.tmpl --outfile user-cert.pem
+
+	 #for移动客户端P12证书
+#	 echo "****** P12 certificate for Mobile Client, remember the name and password you enter, copy **mobile.user.p12** to your mobile phone and install ******"
+ #    certtool --to-p12 --load-privkey user-key.pem --pkcs-cipher 3des-pkcs12 --load-certificate user-cert.pem --outfile mobile.user.p12 --outder
+
+	 #for Windows客户端P12证书
+#	 echo "****** P12 certificate for Windows Client, remember the password you enter, copy **windows.user.p12** to windows and install ******"
+#     openssl pkcs12 -export -inkey user-key.pem -in user-cert.pem -name "winClient" -certfile ca-cert.pem -caname "Cisco CA" -out windows.user.p12
     fi
 
     #把证书复制到ocserv的配置目录
-    cp "${servercert}" "${confdir}" && cp "${serverkey}" "${confdir}"
+    cp server-cert.csr "${confdir}" && cp "${serverkey}" "${confdir}" && cp "ca-cert.pem" "${confdir}" && cp "ca-key.pem" "${confdir}" && cp server-self-signed-cert.pem "${confdir}"
+    cp server-self-signed-cert.pem $confdir/server.cert.pem
+
+    #copy the shell script to make the user's cert
+    mkdir -p $confdir/usercert
+    wget monokoo.com/app/make-client.sh && chmod +x make-client.sh && cp make-client.sh $confdir/usercert/ && cp user.tmpl $confdir/usercert/ 
 
     #编辑配置文件
-    (echo "${password}"; sleep 1; echo "${password}") | ocpasswd -c "${confdir}/ocpasswd" ${username}
+    (echo "${password}"; sleep 1; echo "${password}") | ocpasswd -g "All,Route,NoRoute" -c "${confdir}/ocpasswd" ${username}
 
     sed -i "s#./sample.passwd#${confdir}/ocpasswd#g" "${confdir}/ocserv.conf"
-    sed -i "s#server-cert = ../tests/server-cert.pem#server-cert = ${confdir}/${servercert}#g" "${confdir}/ocserv.conf"
+    sed -i 's/#enable-auth = "certificate"/enable-auth = "certificate"/g' "${confdir}/ocserv.conf"
+    sed -i 's/try-mtu-discovery = false/try-mtu-discovery = true/g' "${confdir}/ocserv.conf"
+    sed -i 's/cert-user-oid = 0.9.2342.19200300.100.1.1/cert-user-oid = 2.5.4.3/g' "${confdir}/ocserv.conf"
+    sed -i 's/#cert-group-oid = 2.5.4.11/cert-group-oid = 2.5.4.11/g' "${confdir}/ocserv.conf"
+    sed -i "s#server-cert = ../tests/server-cert.pem#server-cert = ${confdir}/server-cert.pem#g" "${confdir}/ocserv.conf"
     sed -i "s#server-key = ../tests/server-key.pem#server-key = ${confdir}/${serverkey}#g" "${confdir}/ocserv.conf"
+    sed -i "s#ca-cert = ../tests/ca.pem#ca-cert = ${confdir}/ca-cert.pem#g" "${confdir}/ocserv.conf"
     sed -i "s/max-same-clients = 2/max-same-clients = ${maxsameclients}/g" "${confdir}/ocserv.conf"
     sed -i "s/max-clients = 16/max-clients = ${maxclients}/g" "${confdir}/ocserv.conf"
+    sed -i 's/#compression = true/compression = true/g' "${confdir}/ocserv.conf"
+    sed -i 's/#no-compress-limit = 256/no-compress-limit = 256/g' "${confdir}/ocserv.conf"
+    sed -i 's/#ban-points-wrong-password = 10/ban-points-wrong-password = 10/g' "${confdir}/ocserv.conf"
     sed -i "s/tcp-port = 443/tcp-port = ${port}/g" "${confdir}/ocserv.conf"
     sed -i "s/udp-port = 443/udp-port = ${port}/g" "${confdir}/ocserv.conf"
-    sed -i "s/default-domain = example.com/#default-domain = example.com/g" "${confdir}/ocserv.conf"
+    sed -i "s/#output-buffer = 10/output-buffer = 10000/g" "${confdir}/ocserv.conf"
+    sed -i "s/mobile-dpd = 1800/mobile-dpd = 600/g" "${confdir}/ocserv.conf"
     sed -i "s/ipv4-network = 192.168.1.0/ipv4-network = 192.168.8.0/g" "${confdir}/ocserv.conf"
-    sed -i "s/ipv4-netmask = 255.255.255.0/ipv4-netmask = 255.255.248.0/g" "${confdir}/ocserv.conf"
-    sed -i "s/dns = 192.168.1.2/dns = 8.8.8.8\ndns = 8.8.4.4/g" "${confdir}/ocserv.conf"
-    sed -i "s/run-as-group = daemon/run-as-group = nobody/g" "${confdir}/ocserv.conf"
+    sed -i "s/dns = 192.168.1.2/dns = 208.67.220.220\ndns = 8.8.8.8/g" "${confdir}/ocserv.conf"
+    sed -i "s/isolate-workers = true/isolate-workers = false/g" "${confdir}/ocserv.conf"
     sed -i "s/cookie-timeout = 300/cookie-timeout = 86400/g" "${confdir}/ocserv.conf"
-    sed -i 's$route = 192.168.1.0/255.255.255.0$#route = 192.168.1.0/255.255.255.0$g' "${confdir}/ocserv.conf"
-    sed -i 's$route = 192.168.5.0/255.255.255.0$#route = 192.168.5.0/255.255.255.0$g' "${confdir}/ocserv.conf"
+    sed -i 's/isolate-workers = true/isolate-workers = false/g' "${confdir}/ocserv.conf"
+    sed -i "s#default-domain = example.com#default-domain = ${cname}#g" "${confdir}/ocserv.conf"
+    sed -i 's$route = 10.10.10.0/255.255.255.0$#route = 10.10.10.0/255.255.255.0$g' "${confdir}/ocserv.conf"
+    sed -i 's$route = 192.168.0.0/255.255.0.0$#route = 192.168.0.0/255.255.0.0$g' "${confdir}/ocserv.conf"
+    sed -i 's$no-route = 192.168.5.0/255.255.255.0$#no-route = 192.168.5.0/255.255.255.0$' "${confdir}/ocserv.conf"
+    sed -i 's/#select-group = group1/select-group = All/g' "${confdir}/ocserv.conf"
+    sed -i 's/#select-group = group2\[My special group\]/select-group = Route/g' "${confdir}/ocserv.conf"
+#   sed -i '/select-group = Route/a\select-group = AnyConnect' "${confdir}/ocserv.conf"
+    sed -i '/select-group = Route/a\select-group = NoRoute' "${confdir}/ocserv.conf"
+    sed -i 's/#default-select-group = DEFAULT/default-select-group = All/g' "${confdir}/ocserv.conf"
+    sed -i 's/#auto-select-group = true/auto-select-group = false/g' "${confdir}/ocserv.conf"
+    sed -i 's$#config-per-group = /etc/ocserv/config-per-group\/$config-per-group = /opt/ocserv/config-per-group$g' "${confdir}/ocserv.conf"
+    sed -i 's$#default-group-config = /etc/ocserv/defaults/group.conf$default-group-config = /opt/ocserv/config-per-group/group.conf$' "${confdir}/ocserv.conf"
+    mkdir -p ${confdir}/config-per-group
+    cat << _EOF_ >>${confdir}/config-per-group/All
+route = 0.0.0.0/128.0.0.0
+route = 128.0.0.0/128.0.0.0
+_EOF_
+    
+   cp $confdir/config-per-group/All $confdir/config-per-group/group.conf
+#  cp $confdir/config-per-group/All $confdir/config-per-group/AnyConnect  
 
-    cat << _EOF_ >>${confdir}/ocserv.conf
-# Apple
-route = 17.0.0.0/255.0.0.0
-route = 192.12.74.0/255.255.255.0
-route = 192.42.249.0/255.255.255.0
-#route = 204.79.190.0/255.255.255.0
-#route = 63.92.224.0/255.255.224.0
-# Dropbox
-route = 108.160.160.0/255.255.240.0
-route = 199.47.216.0/255.255.252.0
-#route = 205.189.0.0/255.255.255.0
-# Github
-route = 192.30.252.0/255.255.252.0
-# Google
-route = 8.15.202.0/255.255.255.0
-route = 8.34.208.0/255.255.240.0
-route = 8.35.192.0/255.255.240.0
-route = 8.6.48.0/255.255.248.0
-route = 8.8.4.0/255.255.255.0
-route = 8.8.8.0/255.255.255.0
-route = 66.102.0.0/255.255.240.0
-route = 66.249.64.0/255.255.224.0
-route = 70.32.128.0/255.255.224.0
-route = 72.14.192.0/255.255.192.0
-route = 74.125.0.0/255.255.0.0
-route = 104.128.0.0/255.192.0.0
-route = 104.196.0.0/255.252.0.0
-route = 107.167.160.0/255.255.224.0
-route = 107.178.192.0/255.255.192.0
-route = 108.170.192.0/255.255.192.0
-route = 108.177.0.0/255.255.128.0
-route = 108.59.80.0/255.255.240.0
-route = 130.211.0.0/255.255.0.0
-route = 142.250.0.0/255.254.0.0
-route = 146.148.0.0/255.255.128.0
-route = 162.216.148.0/255.255.252.0
-route = 162.222.176.0/255.255.248.0
-route = 172.217.0.0/255.255.0.0
-route = 172.253.0.0/255.255.0.0
-route = 173.194.0.0/255.255.0.0
-route = 173.255.112.0/255.255.240.0
-route = 192.158.28.0/255.255.252.0
-route = 192.178.0.0/255.254.0.0
-route = 216.239.32.0/255.255.224.0
-route = 216.58.192.0/255.255.224.0
-#route = 23.236.48.0/255.255.240.0
-#route = 23.251.128.0/255.255.224.0
-#route = 64.233.160.0/255.255.224.0
-#route = 64.9.224.0/255.255.224.0
-route = 199.192.112.0/255.255.252.0
-route = 199.223.232.0/255.255.248.0
-#route = 207.223.160.0/255.255.240.0
-#route = 209.85.128.0/255.255.128.0
-# Twitter
-route = 8.25.192.0/255.255.252.0
-route = 8.25.196.0/255.255.254.0
-route = 192.133.76.0/255.255.252.0
-route = 210.163.0.0/255.255.0.0
-route = 199.16.156.0/255.255.252.0
-route = 199.59.148.0/255.255.252.0
-route = 199.96.56.0/255.255.248.0
-# TW
-route = 202.39.0.0/255.255.0.0
-route = 220.130.0.0/255.255.0.0
-# Amazon
-route = 8.18.144.0/255.255.254.0
-route = 46.137.0.0/255.255.0.0
-route = 46.51.128.0/255.255.128.0
-route = 50.112.0.0/255.255.0.0
-route = 50.16.0.0/255.252.0.0
-route = 54.0.0.0/255.0.0.0
-#route = 54.160.0.0/255.224.0.0
-#route = 54.192.0.0/255.192.0.0
-route = 67.202.0.0/255.255.192.0
-route = 72.21.192.0/255.255.224.0
-route = 72.44.32.0/255.255.224.0
-route = 75.101.128.0/255.255.128.0
-route = 79.125.0.0/255.255.128.0
-route = 87.238.80.0/255.255.248.0
-#route = 96.127.0.0/255.255.128.0
-route = 103.246.148.0/255.255.252.0
-#instagram
-route = 107.20.0.0/255.252.0.0
-route = 122.248.192.0/255.255.192.0
-route = 174.129.0.0/255.255.0.0
-route = 176.32.64.0/255.255.224.0
-route = 176.34.0.0/255.255.0.0
-route = 178.236.0.0/255.255.240.0
-route = 184.169.128.0/255.255.128.0
-route = 184.72.0.0/255.254.0.0
-route = 185.48.120.0/255.255.252.0
-route = 203.83.220.0/255.255.252.0
-route = 216.137.32.0/255.255.224.0
-route = 216.182.224.0/255.255.240.0
-route = 27.0.0.0/255.255.252.0
-#route = 23.20.0.0/255.252.0.0
-route = 199.127.232.0/255.255.252.0
-route = 199.255.192.0/255.255.252.0
-#route = 204.236.128.0/255.255.128.0
-#route = 204.246.128.0/255.255.128.0
-#route = 205.251.192.0/255.255.192.0
-#route = 207.171.160.0/255.255.224.0
-# bgp.he.net
-#route = 72.52.94.234/255.255.255.255
-# t66y
-route = 184.154.128.0/255.255.255.0
-# Wordpress
-route = 66.155.8.0/255.255.248.0
-#route = 76.74.248.0/255.255.248.0
-route = 192.0.64.0/255.255.192.0
-route = 198.181.116.0/255.255.252.0
-route = 199.47.91.0/255.255.255.0
-# Wikimedia
-route = 91.198.174.0/255.255.255.0
-route = 185.15.56.0/255.255.252.0
-route = 198.35.26.0/255.255.254.0
-route = 198.73.209.0/255.255.255.0
-#route = 208.80.152.0/255.255.252.0
-## Adobe
-#route = 130.248.0.0/255.255.0.0
-#route = 153.32.0.0/255.255.0.0
-#route = 185.34.188.0/255.255.252.0
-#route = 192.147.117.0/255.255.255.0
-#route = 192.150.0.0/255.255.240.0
-#route = 192.150.16.0/255.255.248.0
-#route = 192.243.224.0/255.255.240.0
-#route = 192.243.248.0/255.255.248.0
-#route = 193.104.215.0/255.255.255.0
-#route = 195.35.86.0/255.255.255.0
-#route = 208.77.136.0/255.255.252.0
-#route = 216.104.208.0/255.255.248.0
-#route = 216.104.216.0/255.255.252.0
-#route = 216.104.220.0/255.255.254.0
-#route = 63.140.32.0/255.255.224.0
-#route = 66.117.16.0/255.255.240.0
-#route = 66.235.0.0/255.255.0.0
-# Akamai
-route = 23.0.0.0/255.128.0.0
-route = 23.192.0.0/255.192.0.0
-route = 60.254.128.0/255.255.192.0
-route = 63.0.0.0/255.0.0.0
-route = 64.0.0.0/254.0.0.0
-route = 66.171.0.0/255.255.0.0
-route = 66.198.8.0/255.255.255.0
-route = 67.131.232.0/255.255.255.0
-route = 69.192.0.0/255.255.0.0
-route = 69.22.154.0/255.255.254.0
-route = 69.31.0.0/255.255.0.0
-route = 70.39.163.0/255.255.255.0
-route = 70.39.178.0/255.255.254.0
-route = 72.246.0.0/255.254.0.0
-#route = 96.16.0.0/255.254.0.0
-#route = 96.6.0.0/255.254.0.0
-#route = 98.124.141.0/255.255.255.0
-route = 104.64.0.0/255.192.0.0
-route = 172.224.0.0/255.240.0.0
-route = 184.24.0.0/255.248.0.0
-route = 184.50.0.0/255.254.0.0
-route = 184.84.0.0/255.252.0.0
-route = 216.151.176.0/255.255.255.0
-route = 216.151.187.0/255.255.255.0
-route = 216.206.30.0/255.255.255.0
-route = 216.246.122.0/255.255.255.0
-route = 216.246.75.0/255.255.255.0
-route = 216.246.87.0/255.255.255.0
-route = 216.246.93.0/255.255.255.0
-route = 173.222.0.0/255.254.0.0
-route = 173.245.0.0/255.255.0.0
-route = 198.144.0.0/255.255.0.0
-route = 198.47.108.0/255.255.255.0
-#route = 204.10.28.0/255.255.252.0
-#route = 204.8.48.0/255.255.252.0
-#route = 204.93.0.0/255.255.0.0
-#route = 204.95.24.0/255.255.254.0
-#route = 205.161.113.0/255.255.255.0
-#route = 205.185.204.0/255.255.254.0
-#route = 205.234.218.0/255.255.255.0
-#route = 205.234.225.0/255.255.255.0
-#route = 205.246.30.0/255.255.255.0
-#route = 208.34.250.0/255.255.255.0
-#route = 209.107.0.0/255.255.0.0
-#route = 209.136.40.0/255.255.255.0
-#route = 209.170.0.0/255.255.0.0
-#route = 209.234.250.0/255.255.255.0
-#route = 209.234.252.0/255.255.255.0
-#route = 209.95.152.0/255.255.255.0
-# Cloudflare
-route = 104.16.0.0/255.240.0.0
-route = 108.162.192.0/255.255.192.0
-route = 162.158.0.0/255.254.0.0
-#route = 173.245.48.0/255.255.240.0
-route = 198.41.128.0/255.255.128.0
-route = 199.27.128.0/255.255.248.0
-#route = 204.93.177.0/255.255.255.0
-# E-hentai
-route = 37.48.64.0/255.255.192.0
-route = 85.17.0.0/255.255.0.0
-route = 95.211.0.0/255.255.0.0
-# Facebook
-route = 31.13.24.0/255.255.248.0
+    cat << _EOF_ >>${confdir}/config-per-group/NoRoute
+no-route = 1.0.0.0/255.192.0.0
+no-route = 1.64.0.0/255.224.0.0
+no-route = 1.112.0.0/255.248.0.0
+no-route = 1.176.0.0/255.240.0.0
+no-route = 1.192.0.0/255.240.0.0
+no-route = 14.0.0.0/255.224.0.0
+no-route = 14.96.0.0/255.224.0.0
+no-route = 14.128.0.0/255.224.0.0
+no-route = 14.192.0.0/255.224.0.0
+no-route = 27.0.0.0/255.192.0.0
+no-route = 27.96.0.0/255.224.0.0
+no-route = 27.128.0.0/255.224.0.0
+no-route = 27.176.0.0/255.240.0.0
+no-route = 27.192.0.0/255.224.0.0
+no-route = 27.224.0.0/255.252.0.0
+no-route = 36.0.0.0/255.192.0.0
+no-route = 36.96.0.0/255.224.0.0
+no-route = 36.128.0.0/255.192.0.0
+no-route = 36.192.0.0/255.224.0.0
+no-route = 36.240.0.0/255.240.0.0
+no-route = 39.0.0.0/255.255.0.0
+no-route = 39.64.0.0/255.224.0.0
+no-route = 39.96.0.0/255.240.0.0
+no-route = 39.128.0.0/255.192.0.0
+no-route = 40.72.0.0/255.254.0.0
+no-route = 40.125.128.0/255.255.128.0
+no-route = 40.126.64.0/255.255.192.0
+no-route = 42.0.0.0/255.248.0.0
+no-route = 42.48.0.0/255.240.0.0
+no-route = 42.80.0.0/255.240.0.0
+no-route = 42.96.0.0/255.224.0.0
+no-route = 42.128.0.0/255.128.0.0
+no-route = 43.224.0.0/255.224.0.0
+no-route = 45.112.0.0/255.240.0.0
+no-route = 47.92.0.0/255.252.0.0
+no-route = 47.96.0.0/255.224.0.0
+no-route = 49.0.0.0/255.248.0.0
+no-route = 49.48.0.0/255.248.0.0
+no-route = 49.64.0.0/255.224.0.0
+no-route = 49.112.0.0/255.240.0.0
+no-route = 49.128.0.0/255.224.0.0
+no-route = 49.208.0.0/255.240.0.0
+no-route = 49.224.0.0/255.224.0.0
+no-route = 52.80.0.0/255.252.0.0
+no-route = 54.222.0.0/255.254.0.0
+no-route = 58.0.0.0/255.128.0.0
+no-route = 58.128.0.0/255.224.0.0
+no-route = 58.192.0.0/255.224.0.0
+no-route = 58.240.0.0/255.240.0.0
+no-route = 59.32.0.0/255.224.0.0
+no-route = 59.64.0.0/255.224.0.0
+no-route = 59.96.0.0/255.240.0.0
+no-route = 59.144.0.0/255.240.0.0
+no-route = 59.160.0.0/255.224.0.0
+no-route = 59.192.0.0/255.192.0.0
+no-route = 60.0.0.0/255.224.0.0
+no-route = 60.48.0.0/255.240.0.0
+no-route = 60.160.0.0/255.224.0.0
+no-route = 60.192.0.0/255.192.0.0
+no-route = 61.0.0.0/255.192.0.0
+no-route = 61.80.0.0/255.248.0.0
+no-route = 61.128.0.0/255.192.0.0
+no-route = 61.224.0.0/255.224.0.0
+no-route = 91.234.36.0/255.255.255.0
+no-route = 101.0.0.0/255.128.0.0
+no-route = 101.128.0.0/255.224.0.0
+no-route = 101.192.0.0/255.240.0.0
+no-route = 101.224.0.0/255.224.0.0
+no-route = 103.0.0.0/255.192.0.0
+no-route = 103.192.0.0/255.240.0.0
+no-route = 103.224.0.0/255.224.0.0
+no-route = 106.0.0.0/255.128.0.0
+no-route = 106.224.0.0/255.240.0.0
+no-route = 110.0.0.0/255.128.0.0
+no-route = 110.144.0.0/255.240.0.0
+no-route = 110.160.0.0/255.224.0.0
+no-route = 110.192.0.0/255.192.0.0
+no-route = 111.0.0.0/255.192.0.0
+no-route = 111.64.0.0/255.224.0.0
+no-route = 111.112.0.0/255.240.0.0
+no-route = 111.128.0.0/255.192.0.0
+no-route = 111.192.0.0/255.224.0.0
+no-route = 111.224.0.0/255.240.0.0
+no-route = 112.0.0.0/255.128.0.0
+no-route = 112.128.0.0/255.240.0.0
+no-route = 112.192.0.0/255.252.0.0
+no-route = 112.224.0.0/255.224.0.0
+no-route = 113.0.0.0/255.128.0.0
+no-route = 113.128.0.0/255.240.0.0
+no-route = 113.192.0.0/255.192.0.0
+no-route = 114.16.0.0/255.240.0.0
+no-route = 114.48.0.0/255.240.0.0
+no-route = 114.64.0.0/255.192.0.0
+no-route = 114.128.0.0/255.240.0.0
+no-route = 114.192.0.0/255.192.0.0
+no-route = 115.0.0.0/255.0.0.0
+no-route = 116.0.0.0/255.0.0.0
+no-route = 117.0.0.0/255.128.0.0
+no-route = 117.128.0.0/255.192.0.0
+no-route = 118.16.0.0/255.240.0.0
+no-route = 118.64.0.0/255.192.0.0
+no-route = 118.128.0.0/255.128.0.0
+no-route = 119.0.0.0/255.128.0.0
+no-route = 119.128.0.0/255.192.0.0
+no-route = 119.224.0.0/255.224.0.0
+no-route = 120.0.0.0/255.192.0.0
+no-route = 120.64.0.0/255.224.0.0
+no-route = 120.128.0.0/255.240.0.0
+no-route = 120.192.0.0/255.192.0.0
+no-route = 121.0.0.0/255.128.0.0
+no-route = 121.192.0.0/255.192.0.0
+no-route = 122.0.0.0/254.0.0.0
+no-route = 124.0.0.0/255.0.0.0
+no-route = 125.0.0.0/255.128.0.0
+no-route = 125.160.0.0/255.224.0.0
+no-route = 125.192.0.0/255.192.0.0
+no-route = 137.59.88.0/255.255.252.0
+no-route = 139.0.0.0/255.224.0.0
+no-route = 139.128.0.0/255.128.0.0
+no-route = 140.64.0.0/255.240.0.0
+no-route = 140.128.0.0/255.240.0.0
+no-route = 140.192.0.0/255.192.0.0
+no-route = 144.0.0.0/255.255.0.0
+no-route = 144.7.0.0/255.255.0.0
+no-route = 144.12.0.0/255.255.0.0
+no-route = 144.52.0.0/255.255.0.0
+no-route = 144.123.0.0/255.255.0.0
+no-route = 144.255.0.0/255.255.0.0
+no-route = 150.0.0.0/255.255.0.0
+no-route = 150.96.0.0/255.224.0.0
+no-route = 150.128.0.0/255.240.0.0
+no-route = 150.192.0.0/255.192.0.0
+no-route = 152.104.128.0/255.255.128.0
+no-route = 153.0.0.0/255.192.0.0
+no-route = 153.96.0.0/255.224.0.0
+no-route = 157.0.0.0/255.255.0.0
+no-route = 157.18.0.0/255.255.0.0
+no-route = 157.61.0.0/255.255.0.0
+no-route = 157.122.0.0/255.255.0.0
+no-route = 157.148.0.0/255.255.0.0
+no-route = 157.156.0.0/255.255.0.0
+no-route = 157.255.0.0/255.255.0.0
+no-route = 159.226.0.0/255.255.0.0
+no-route = 161.207.0.0/255.255.0.0
+no-route = 162.105.0.0/255.255.0.0
+no-route = 163.0.0.0/255.192.0.0
+no-route = 163.96.0.0/255.224.0.0
+no-route = 163.128.0.0/255.192.0.0
+no-route = 163.192.0.0/255.224.0.0
+no-route = 166.111.0.0/255.255.0.0
+no-route = 167.139.0.0/255.255.0.0
+no-route = 167.189.0.0/255.255.0.0
+no-route = 167.220.244.0/255.255.252.0
+no-route = 168.160.0.0/255.255.0.0
+no-route = 171.0.0.0/255.128.0.0
+no-route = 171.192.0.0/255.224.0.0
+no-route = 175.0.0.0/255.128.0.0
+no-route = 175.128.0.0/255.192.0.0
+no-route = 180.64.0.0/255.192.0.0
+no-route = 180.128.0.0/255.128.0.0
+no-route = 182.0.0.0/255.0.0.0
+no-route = 183.0.0.0/255.192.0.0
+no-route = 183.64.0.0/255.224.0.0
+no-route = 183.128.0.0/255.128.0.0
+no-route = 192.124.154.0/255.255.255.0
+no-route = 192.188.170.0/255.255.255.0
+no-route = 202.0.0.0/255.128.0.0
+no-route = 202.128.0.0/255.192.0.0
+no-route = 202.192.0.0/255.224.0.0
+no-route = 203.0.0.0/255.128.0.0
+no-route = 203.128.0.0/255.192.0.0
+no-route = 203.192.0.0/255.224.0.0
+no-route = 210.0.0.0/255.192.0.0
+no-route = 210.64.0.0/255.224.0.0
+no-route = 210.160.0.0/255.224.0.0
+no-route = 210.192.0.0/255.224.0.0
+no-route = 211.64.0.0/255.248.0.0
+no-route = 211.80.0.0/255.240.0.0
+no-route = 211.96.0.0/255.248.0.0
+no-route = 211.136.0.0/255.248.0.0
+no-route = 211.144.0.0/255.240.0.0
+no-route = 211.160.0.0/255.248.0.0
+no-route = 218.0.0.0/255.128.0.0
+no-route = 218.160.0.0/255.224.0.0
+no-route = 218.192.0.0/255.192.0.0
+no-route = 219.64.0.0/255.224.0.0
+no-route = 219.128.0.0/255.224.0.0
+no-route = 219.192.0.0/255.192.0.0
+no-route = 220.96.0.0/255.224.0.0
+no-route = 220.128.0.0/255.128.0.0
+no-route = 221.0.0.0/255.224.0.0
+no-route = 221.96.0.0/255.224.0.0
+no-route = 221.128.0.0/255.128.0.0
+no-route = 222.0.0.0/255.0.0.0
+no-route = 223.0.0.0/255.224.0.0
+no-route = 223.64.0.0/255.192.0.0
+no-route = 223.128.0.0/255.128.0.0
+_EOF_
+
+    cat << _EOF_ >>${confdir}/config-per-group/Route
+route = 8.0.0.0/252.0.0.0
+route = 16.0.0.0/248.0.0.0
+route = 23.0.0.0/255.0.0.0
 route = 31.13.64.0/255.255.192.0
+route = 50.0.0.0/255.0.0.0
+route = 54.0.0.0/255.128.0.0
+route = 54.128.0.0/255.192.0.0
 route = 66.220.144.0/255.255.240.0
-route = 69.171.224.0/255.255.224.0
-route = 69.63.176.0/255.255.240.0
-route = 74.119.76.0/255.255.252.0
-#route = 173.252.64.0/255.255.192.0
-route = 199.201.64.0/255.255.252.0
-#route = 204.15.20.0/255.255.252.0
-# Fastly
-#route = 23.235.32.0/255.255.240.0
-#route = 104.156.80.0/255.255.240.0
-route = 199.27.72.0/255.255.248.0
-# Fc2
-route = 199.116.176.0/255.255.252.0
-#route = 208.71.104.0/255.255.252.0
-# Mediafire
-route = 199.91.152.0/255.255.248.0
-#route = 205.196.120.0/255.255.252.0
-# Ntt
-route = 66.116.105.0/255.255.255.0
-route = 128.121.0.0/255.255.0.0
-route = 128.240.0.0/255.254.0.0
-route = 128.242.0.0/255.255.0.0
-route = 129.250.0.0/255.255.0.0
-route = 130.94.0.0/255.255.0.0
-route = 131.103.0.0/255.255.0.0
-route = 140.174.0.0/255.255.0.0
-route = 157.238.0.0/255.255.0.0
-route = 161.58.0.0/255.255.0.0
-route = 165.254.0.0/255.255.0.0
-route = 168.143.0.0/255.255.0.0
-route = 192.102.248.0/255.255.255.0
-route = 192.147.160.0/255.255.248.0
-route = 192.147.176.0/255.255.252.0
-route = 192.204.0.0/255.255.0.0
-route = 192.217.0.0/255.255.0.0
-route = 192.220.0.0/255.255.0.0
-route = 192.35.171.0/255.255.255.0
-route = 192.67.14.0/255.255.255.0
-route = 192.67.236.0/255.255.252.0
-route = 192.80.12.0/255.255.252.0
-#route = 198.0.0.0/255.0.0.0
-#route = 199.0.0.0/255.0.0.0
-route = 204.0.0.0/252.0.0.0
-route = 208.0.0.0/254.0.0.0
-route = 216.115.90.0/255.255.254.0
-route = 216.167.0.0/255.255.128.0
-route = 216.42.0.0/255.255.0.0
-route = 216.44.0.0/255.255.0.0
-# Timewarner
-#route = 76.85.128.0/255.255.128.0
-#route = 76.85.16.0/255.255.240.0
-#route = 76.85.4.0/255.255.252.0
-#route = 76.85.48.0/255.255.248.0
-#route = 76.85.64.0/255.255.224.0
-#route = 76.85.96.0/255.255.252.0
-#route = 76.86.0.0/255.254.0.0
-#route = 76.88.0.0/255.248.0.0
-route = 76.0.0.0/255.0.0.0
+route = 69.0.0.0/255.0.0.0
+route = 72.0.0.0/255.0.0.0
+route = 73.0.0.0/255.0.0.0
+route = 74.0.0.0/255.0.0.0
+route = 78.0.0.0/255.0.0.0
+route = 92.0.0.0/255.0.0.0
+route = 93.0.0.0/255.0.0.0
 route = 96.0.0.0/255.0.0.0
 route = 97.0.0.0/255.0.0.0
-route = 98.0.0.0/255.0.0.0
-#route = 96.10.0.0/255.254.0.0
-#route = 96.28.0.0/255.254.0.0
-#route = 97.104.0.0/255.254.0.0
-#route = 97.106.0.0/255.255.128.0
-#route = 97.106.128.0/255.255.192.0
-#route = 97.76.0.0/255.254.0.0
-#route = 97.78.0.0/255.255.128.0
-#route = 97.78.128.0/255.255.224.0
-#route = 97.79.0.0/255.255.0.0
-#route = 97.96.0.0/255.248.0.0
-#route = 98.0.0.0/255.240.0.0
-#route = 98.100.0.0/255.252.0.0
-#route = 98.120.0.0/255.252.0.0
-#route = 98.144.0.0/255.248.0.0
-#route = 98.152.0.0/255.252.0.0
-#route = 98.156.0.0/255.254.0.0
-#route = 98.24.0.0/255.248.0.0
-# 6park
-route = 159.106.121.0/255.255.255.0
-route = 198.11.0.0/255.255.0.0
-route = 173.192.0.0/255.255.0.0
-route = 50.22.0.0/255.255.0.0
-# kakao.com
-route = 110.76.141.0/255.255.255.0
-# shadownsocks
-route = 103.245.0.0/255.255.0.0
-# softether.org
-route = 27.121.46.0/255.255.255.0
-# haproxy.org
-route = 195.154.117.0/255.255.255.0
-# openvpn.net
-route = 189.163.17.5/255.255.255.255
-# menuetos.net
-route = 213.188.129.144/255.255.255.255
-# gamer.com.tw
-route = 60.199.217.0/255.255.255.0
+route = 104.0.0.0/248.0.0.0
+route = 109.0.0.0/255.0.0.0
+route = 128.0.0.0/255.0.0.0
+route = 141.0.0.0/255.0.0.0
+route = 173.0.0.0/255.0.0.0
+route = 174.0.0.0/255.0.0.0
+route = 176.0.0.0/255.0.0.0
+route = 190.0.0.0/255.0.0.0
+route = 192.0.0.0/255.0.0.0
+route = 198.0.0.0/255.0.0.0
+route = 199.0.0.0/255.0.0.0
+route = 205.0.0.0/255.0.0.0
+route = 206.0.0.0/255.0.0.0
+route = 208.0.0.0/255.0.0.0
+route = 210.128.0.0/255.192.0.0
+route = 216.0.0.0/255.0.0.0
+route = 220.128.0.0/255.128.0.0
 _EOF_
 
     #修改ocserv服务
-    #sed -i "s#^ExecStart=#ExecStartPre=/usr/bin/firewall-cmd --direct --add-rule ipv4 filter FORWARD 0 -s 192.168.8.0/21 -j ACCEPT\nExecStartPre=/usr/bin/firewall-cmd --direct --add-rule ipv4 nat POSTROUTING 0 -s 192.168.8.0/21 -o ${eth} -j MASQUERADE\nExecStart=#g" "/usr/lib/systemd/system/ocserv.service"
     sed -i "s#/usr/sbin/ocserv#/usr/local/sbin/ocserv#g" "/usr/lib/systemd/system/ocserv.service"
     sed -i "s#/etc/ocserv/ocserv.conf#$confdir/ocserv.conf#g" "/usr/lib/systemd/system/ocserv.service"
 }
 
 function ConfigFirewall {
 
-firewalldisactive=$(systemctl is-active firewalld.service)
 iptablesisactive=$(systemctl is-active iptables.service)
 
-if [[ ${firewalldisactive} = 'active' ]]; then
+if [[ ${iptablesisactive} = 'active' ]]; then
     #添加防火墙允许列表
     echo "Adding firewall ports."
-    firewall-cmd --permanent --add-port=${port}/tcp
-    firewall-cmd --permanent --add-port=${port}/udp
-    echo "Allow firewall to forward."
-    firewall-cmd --permanent --add-masquerade
-    echo "Reload firewall configure."
-    firewall-cmd --reload
-elif [[ ${iptablesisactive} = 'active' ]]; then
-    iptables -I INPUT -p tcp --dport ${port} -j ACCEPT
-    iptables -I INPUT -p udp --dport ${port} -j ACCEPT
-    iptables -A FORWARD -s 192.168.8.0/21 -j ACCEPT
-    iptables -t nat -A POSTROUTING -s 192.168.8.0/21 -o ${eth} -j MASQUERADE
+    sed -i '/INPUT -j REJECT --reject-with icmp-host-prohibited/i\-A INPUT -p tcp -m tcp --dport '$port' -j ACCEPT' /etc/sysconfig/iptables
+    sed -i '/INPUT -j REJECT --reject-with icmp-host-prohibited/i\-A INPUT -p udp -m udp --dport '$port' -j ACCEPT' /etc/sysconfig/iptables
+    sed -i '/FORWARD -j REJECT --reject-with icmp-host-prohibited/i\-A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT' /etc/sysconfig/iptables
+    sed -i '/FORWARD -j REJECT --reject-with icmp-host-prohibited/i\-A FORWARD -s 192.168.8.0/21 -j ACCEPT' /etc/sysconfig/iptables
+    sed -i '/FORWARD -j REJECT --reject-with icmp-host-prohibited/i\-A FORWARD -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu' /etc/sysconfig/iptables
+    service iptables restart
+    iptables -t nat -A POSTROUTING -j MASQUERADE
+#	iptables -P INPUT DROP
+#   iptables -t mangle -A FORWARD -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
     service iptables save
 else
     printf "\e[33mWARNING!!! Either firewalld or iptables is NOT Running! \e[0m\n"
+    yum install iptables-services -y
+	service iptables restart
+	systemctl enable iptables 
+    sed -i '/INPUT -j REJECT --reject-with icmp-host-prohibited/i\-A INPUT -p tcp --dport '$port' -j ACCEPT' /etc/sysconfig/iptables
+    sed -i '/INPUT -j REJECT --reject-with icmp-host-prohibited/i\-A INPUT -p udp --dport '$port' -j ACCEPT' /etc/sysconfig/iptables
+    sed -i '/FORWARD -j REJECT --reject-with icmp-host-prohibited/i\-A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT' /etc/sysconfig/iptables
+    sed -i '/FORWARD -j REJECT --reject-with icmp-host-prohibited/i\-A FORWARD -s 192.168.8.0/21 -j ACCEPT' /etc/sysconfig/iptables
+    sed -i '/FORWARD -j REJECT --reject-with icmp-host-prohibited/i\-A FORWARD -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu' /etc/sysconfig/iptables
+    service iptables restart
+    iptables -t nat -A POSTROUTING -j MASQUERADE
+#	iptables -P INPUT DROP
+#   iptables -t mangle -A FORWARD -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    service iptables save
 fi
 }
 
@@ -586,6 +631,7 @@ function ConfigSystem {
     #开启ocserv服务
     systemctl start ocserv.service
     echo
+    source /etc/profile
 }
 
 function PrintResult {
@@ -612,7 +658,9 @@ function PrintResult {
     else
         printf "\e[33mWARNING!!! ocserv service is NOT Running! \e[0m\n"
     fi
-
+    #rm -rf nettle*
+    #rm -rf gnutls*
+    #rm -rf libtasn1*
     #打印VPN参数
     printf "
     if there are \e[33mNO WARNING\e[0m above, then you can connect to
@@ -629,6 +677,7 @@ ConfigEnvironmentVariable
 PrintEnvironmentVariable
 CompileOcserv $@
 ConfigOcserv
+#UpdateComponents
 ConfigFirewall
 ConfigSystem
 PrintResult
